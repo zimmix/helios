@@ -1,0 +1,19 @@
+reserved_power: 1000
+home_battery: 95
+home:
+    street: '$YOUR_STEET_ADDRESS'
+    city: '$YOUR_CITY'
+    state: '$YOUR_STATE'
+    postcode: '$YOUR_ZIP'
+enphase:
+    system_id: '$YOUR_ENPHASE_SYSTEM_ID'
+    api_key: '$YOUR_ENPHASE_API_KEY'
+    client_id: '$YOUR_ENPHASE_API_CLIENT_ID'
+    client_secret: '$YOUR_ENPHASE_API_CLIENT_SECRET'
+    auth_code: '$YOUR_ENPHASE_AUTH_CODE'
+    token_file: enphase_tokens.json
+tesla:
+    token_file: tesla_tokens.json
+geoapify:
+    api_url: https://api.geoapify.com/v1
+    api_key: '$YOUR_GEOAPIFY_API_KEY'

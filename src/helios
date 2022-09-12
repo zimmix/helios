@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+
+# This file is part of Helios.
+#
+# Helios is free software: you can redistribute it and/or modify it under the terms of the
+# GNU General Public License version 3 as published by the Free Software Foundation.
+# Helios is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+# without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE. See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along with Helios.
+# If not, see <https://www.gnu.org/licenses/>.
+
+import sys
+import signal
+import os.path
+import argparse
+import pprint
+import time
+import yaml
+import logging
+
+from datetime import datetime
+from dateutil import tz as timezone
+
+from control import Amperage
+from solar.enphase import EnphaseInterface
+from vehicles.tesla import TeslaSelector
+from geo.geoapify import GeoapifyAPI
+
+INIT_LOG_LEVEL = logging.INFO
+START_TIME = time.time()
+
+class ExceptionSIGTERM(Exception):
+    pass
+
+def sig_handler_usr1(signum, frame):
+    if l.getEffectiveLevel() == logging.DEBUG:
+        if INIT_LOG_LEVEL != logging.DEBUG:
+            l.info(f"Setting logg!ing level to {logging.getLevelName(INIT_LOG_LEVEL)}.")
+            l.setLevel(INIT_LOG_LEVEL)
+    else:
+        l.info(f"Setting logging level to DEBUG.")
+        l.setLevel(logging.DEBUG)
+
+def sig_handler_term(signum, frame):
+    raise ExceptionSIGTERM
+
+def parse_options():
+    description = "EV Solar Charge Controller"
+    parser = argparse.ArgumentParser(description=description)
+
+    parser.add_argument('-c', type=str, default='helios.yaml',
+        help='YAML configuration file.')
+
+    parser.add_argument('-e', action='store_true',
+        help='Generate Enphase authorization url and exit.')
+
+    options = parser.parse_args()
+
+    errors = []
+
+    if not os.path.exists(options.c):
+        errors.append(f"Configuration file: '{options.c}' does not exist.")
+
+    if len(errors) > 0:
+        for error in errors:
+            print(f"*** {error}")
+        print("*** for usage information use -h")
+        print("")
+        sys.exit(1)
+
+    return options
+
+def process_config(config_file):
+    c = {}
+    with open(config_file, 'r') as stream:
+        c = yaml.safe_load(stream)
+
+    return c
+
+def helios():
+    tesla = None
+
+    geoapify = GeoapifyAPI(c['geoapify']['api_url'], c['geoapify']['api_key'])
+
+    tz = geoapify.get_timezone(c['home']['street'], c['home']['city'],
+                               c['home']['state'], c['home']['postcode'])
+
+    l.info(f"Found timezone of {tz}.")
+
+    enphase = EnphaseInterface(c['enphase']['system_id'],
+                               c['enphase']['api_key'],
+                               c['enphase']['client_id'],
+                               c['enphase']['client_secret'],
+                               c['enphase']['auth_code'],
+                               c['enphase']['token_file'])
+    if o.e:
+        enphase.print_auth_url()
+        sys.exit(0)
+    else:
+        enphase.refresh_tokens()
+
+    gen_range = enphase.get_generation_range(tz)
+    l.info(f"Found generation range of {gen_range[0]}:00 to {gen_range[-1]}:00.")
+
+    selector = TeslaSelector(geoapify, c['tesla']['token_file'])
+
+    amp = Amperage(enphase, c['home_battery'], c['reserved_power'], START_TIME)
+
+    try:
+        while(1):
+            tesla = selector.select_vehicle(c['home']['street'])
+
+            if tesla:
+                break
+
+            l.info("No eligible vehicles found.  Will check again.")
+
+            enphase.refresh_tokens()
+            selector.refresh_tokens()
+
+            time.sleep(900)
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except ExceptionSIGTERM:
+        sys.exit(0)
+
+    try:
+        amp_target = tesla.get_last_charging_amps()
+        initial_amps = tesla.get_init_charging_amps()
+
+        l.info(f"Initial charging amps set to: {initial_amps}.")
+        l.info("Entering control loop ...")
+
+        while(1):
+            l.info("Checking to see if anything needs to be adjusted ...")
+            enphase.refresh_tokens()
+            tesla.refresh_tokens()
+
+            local_hour = datetime.now(tz=timezone.gettz(tz)).hour
+
+            if local_hour == 0:
+                gen_range = enphase.get_generation_range(tz)
+                l.info(f"Found generation range of {gen_range[0]}:00 to {gen_range[-1]}:00.")
+                time.sleep(3600)
+
+            if local_hour in gen_range:
+                new_tesla = selector.select_vehicle(c['home']['street'])
+                if new_tesla:
+                    tesla = new_tesla
+
+                if not tesla.is_home(c['home']['street']):
+                    l.info("Vehicle is not located at home.  Will check again later ...")
+                    if amp_target and (amp_target != initial_amps):
+                        tesla.reset_charge_configuration()
+
+                    amp_target = None
+
+                    time.sleep(300)
+                    continue
+
+                if not tesla.is_connected():
+                    l.info("No vehicle connected to a charger. Will check again later ...")
+                    if amp_target and (amp_target != initial_amps):
+                        tesla.reset_charge_configuration()
+
+                    amp_target = None
+
+                    time.sleep(300)
+                    continue
+
+                if tesla.is_charged():
+                    l.info("Vehicle is charged.  Will check again later ...")
+                    if amp_target and (amp_target != initial_amps):
+                        if tesla.is_charging():
+                            tesla.stop_charging()
+                        tesla.reset_charge_configuration()
+
+                    amp_target = None
+
+                    time.sleep(300)
+                    continue
+
+                l.info("Vehicle connected at home and solar power is being generated.")
+                amp_target = amp.find_target()
+            else:
+                l.info("Outside of solar generation range. Will check again alater.")
+                time.sleep(300)
+                continue
+
+            if amp_target:
+                tesla.set_charging_amps(amp_target)
+                tesla.start_charging()
+                tesla.store_latest_stats()
+            else:
+                if tesla.is_charging():
+                    tesla.stop_charging()
+                    tesla.reset_charge_configuration()
+
+            n = 1
+            while (not amp.check_power()):
+                if (n % 5 > 0):
+                    print(".", end='', flush=True)
+
+                time.sleep(15)
+                n += 1
+
+            print("")
+
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except ExceptionSIGTERM:
+        sys.exit(0)
+    finally:
+        l.info("Cleaning up and exiting ...")
+        if tesla.is_charging():
+            tesla.stop_charging()
+        if amp_target and (amp_target != initial_amps):
+            tesla.reset_charge_configuration()
+
+if __name__ == '__main__':
+    l = logging.getLogger('helios')
+    l.setLevel(level=INIT_LOG_LEVEL)
+    fh = logging.StreamHandler()
+    fh_formatter = logging.Formatter('%(asctime)s %(levelname)s %(lineno)d:%(filename)s(%(process)d) - %(message)s')
+    fh.setFormatter(fh_formatter)
+    l.addHandler(fh)
+
+    signal.signal(signal.SIGUSR1, sig_handler_usr1)
+
+    o = parse_options()
+
+    l.info("Starting the EV Solar Charge Controller ...")
+    l.info(f"Processing configuration: {o.c} ...")
+    c = process_config(o.c)
+
+    signal.signal(signal.SIGTERM, sig_handler_term)
+
+    helios()

@@ -1,0 +1,7 @@
+# Required Python packages
+
+requests
+pyaml
+timezonefinder
+python-dateutil
+
