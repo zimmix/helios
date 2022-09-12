@@ -1,4 +1,0 @@
-Update to reduce API calls to Enphase
-- Predict power generation hours, using previous day's generation.
-- Update prediction daily at midnight.
-- Do not pull energy meters or check for an amperage target if out of range.
