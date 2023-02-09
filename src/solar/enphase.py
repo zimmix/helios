@@ -127,7 +127,7 @@ class EnphaseInterface():
 
     def __get_meter_data(self, method, last_n_seconds):
         granularity = 'week'
-        start_at = time.time() - last_n_seconds
+        start_at = int(time.time()) - last_n_seconds
 
         base_url = f"{self.__api_url}/systems/{self.__system_id}/telemetry"
         params = f"?granularity={granularity}&start_at={start_at}&key={self.__api_key}"
