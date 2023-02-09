@@ -136,7 +136,7 @@ class EnphaseInterface():
 
     def get_generation_range(self, tz, min_power=1220):
         tz = timezone.gettz(tz)
-        energy_data = self.get_pro_meters(432000)
+        energy_data = self.get_pro_meters(129600)
 
         time_one = None
         time_two = None
