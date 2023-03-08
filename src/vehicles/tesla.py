@@ -39,16 +39,19 @@ class TeslaBaseClass():
 
         r = None
         for i in range(0,retries):
-            r = requests.post(url, data=json.dumps(body), headers=self._access_headers)
+            try:
+                r = requests.post(url, data=json.dumps(body), headers=self._access_headers)
+            except requests.exceptions.ConnectionError as err:
+                l.error(f"Tesla API POST {api_path} => {err}")
+                time.sleep(300)
+
             if r.status_code == 200:
-                break
-            elif i == 6:
                 break
             elif r.status_code == 401:
                 time.sleep(60)
                 self.refresh_tokens(True)
             elif r.status_code == 503:
-                time.sleep(300)
+                time.sleep(3600)
             else:
                 time.sleep(sleep)
             sleep = sleep * 1.1 ** i

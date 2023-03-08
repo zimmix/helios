@@ -79,6 +79,16 @@ def process_config(config_file):
 
     return c
 
+def get_generation_range(enphase, tz):
+    gen_range = enphase.get_generation_range(tz)
+    while(len(gen_range) == 0):
+        l.error("Failed get generation range.")
+        time.sleep(300)
+        gen_range = enphase.get_generation_range(tz)
+
+    l.info(f"Found generation range of {gen_range[0]}:00 to {gen_range[-1]}:00.")
+    return gen_range
+
 def helios():
     tesla = None
 
@@ -101,8 +111,7 @@ def helios():
     else:
         enphase.refresh_tokens()
 
-    gen_range = enphase.get_generation_range(tz)
-    l.info(f"Found generation range of {gen_range[0]}:00 to {gen_range[-1]}:00.")
+    gen_range = get_generation_range(enphase, tz)
 
     selector = TeslaSelector(geoapify, c['tesla']['token_file'])
 
@@ -141,9 +150,7 @@ def helios():
             local_hour = datetime.now(tz=timezone.gettz(tz)).hour
 
             if local_hour == 0:
-                gen_range = enphase.get_generation_range(tz)
-                l.info(f"Found generation range of {gen_range[0]}:00 to {gen_range[-1]}:00.")
-                time.sleep(3600)
+                gen_range = get_generation_range(enphase, tz)
 
             if local_hour in gen_range:
                 new_tesla = selector.select_vehicle(c['home']['street'])

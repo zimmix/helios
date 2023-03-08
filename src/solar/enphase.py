@@ -134,30 +134,32 @@ class EnphaseInterface():
 
         return self.__get_energy_data(base_url, params, method)
 
-    def get_generation_range(self, tz, min_power=1220):
+    def get_generation_range(self, tz):
         tz = timezone.gettz(tz)
-        energy_data = self.get_pro_meters(129600)
+        energy_data = self.get_pro_meters(1209600)
 
         time_one = None
         time_two = None
 
         gen = []
 
+        gen_d = {}
         for item in energy_data:
             dt = datetime.fromtimestamp(int(item['end_time']), tz=tz)
-            gen.append([ dt.hour, item['pwr_produced']] )
+            if not dt.hour in gen_d:
+                gen_d[dt.hour] = []
+            gen_d[dt.hour].append(item['pwr_produced'])
 
-        sorter = lambda x: (x[1], x[0])
-        sorted_gen = sorted(gen, key=sorter)
-        for l in gen:
-            if l[0] >= 12:
-                if not time_two:
-                    if l[1] < 1200 and l[1] > 900:
-                        time_two = l[0]
-            else:
-                if not time_one:
-                    if l[1] >= 1200 and l[1] < 1400:
-                        time_one = l[0]
+        for h in range(0,23):
+            gen.append(sum(gen_d[h]) / len(gen_d[h]))
+
+        for h in range(0,23):
+            if not time_one and gen[h] >= 1200:
+                time_one = h
+                l.debug(f"Found time one: {time_one}")
+            if time_one and not time_two and gen[h] < 1200:
+                time_two = h
+                l.debug(f"Found time two: {time_two}")
 
         gen_range = []
         for i in range(time_one, time_two+1):
