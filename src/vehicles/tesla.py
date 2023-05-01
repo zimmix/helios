@@ -75,6 +75,8 @@ class TeslaBaseClass():
             elif r.status_code == 401:
                 time.sleep(60)
                 self.refresh_tokens(True)
+            elif r.status_code == 408:
+                time.sleep(300)
             else:
                 time.sleep(sleep)
             sleep = sleep * 1.1 ** i
@@ -223,11 +225,11 @@ class TeslaInterface(TeslaBaseClass):
 
     def get_charging_stats(self):
         self.wake()
-        url = f"{self._api_url}/vehicles/{self._vehicle_id}/data_request/charge_state"
+        url = f"{self._api_url}/vehicles/{self._vehicle_id}/vehicle_data"
 
         r = self._get(url, {})
 
-        return r.json()['response']
+        return r.json()['response']['charge_state']
 
     def get_init_charging_amps(self):
         return self.__init_charging_stats['charge_current_request']
@@ -252,17 +254,22 @@ class TeslaInterface(TeslaBaseClass):
 
     def get_vehicle_ll(self):
         vdata = self.get_vehicle_data()
+        
+        ll = None
+        if vdata:
+            ll = { 'lat' : vdata['drive_state']['latitude'], 'lon' : vdata['drive_state']['longitude'] }
 
-        return { 'lat' : vdata['drive_state']['latitude'], 'lon' : vdata['drive_state']['longitude'] }
+        return ll
 
     def is_home(self, home_address):
         ll = self.get_vehicle_ll()
 
         home = False
-        street_address = self._geoapify.get_street_address(ll['lat'], ll['lon'])
+        if ll:
+            street_address = self._geoapify.get_street_address(ll['lat'], ll['lon'])
 
-        if street_address == home_address:
-            home = True
+            if street_address == home_address:
+                home = True
 
         return home
 
