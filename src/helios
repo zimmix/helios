@@ -19,6 +19,7 @@ import pprint
 import time
 import yaml
 import logging
+import traceback
 
 from datetime import datetime
 from dateutil import tz as timezone
@@ -244,4 +245,9 @@ if __name__ == '__main__':
 
     signal.signal(signal.SIGTERM, sig_handler_term)
 
-    helios()
+    while (1):
+        try:
+            helios()
+        except Exception as e:
+            l.error(traceback.format_exc())
+            time.sleep(3600)
